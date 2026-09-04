@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import inspect
 from typing import Callable, Optional
 
 from telethon import TelegramClient
@@ -31,6 +32,14 @@ from telethon.errors import (
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+async def _client_is_connected(client: TelegramClient) -> bool:
+    """Support synchronous Telethon clients and async test/client adapters."""
+    connected = client.is_connected()
+    if inspect.isawaitable(connected):
+        return bool(await connected)
+    return bool(connected)
 
 
 class AuthenticationError(Exception):
@@ -148,7 +157,7 @@ class TelegramAuthService:
         finally:
             # Always disconnect the temporary auth client — the main
             # TelegramClientService will reconnect using the saved session.
-            if client.is_connected():
+            if await _client_is_connected(client):
                 await client.disconnect()
 
     async def check_session(self) -> dict:
@@ -178,5 +187,5 @@ class TelegramAuthService:
         except Exception as exc:
             return {"authenticated": False, "reason": str(exc)}
         finally:
-            if client.is_connected():
+            if await _client_is_connected(client):
                 await client.disconnect()

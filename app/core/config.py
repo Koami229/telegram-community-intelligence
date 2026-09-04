@@ -82,6 +82,14 @@ class Settings(BaseSettings):
 
     # ── Application ──────────────────────────────────────────────────────────
     secret_key: str = ""
+    ingestion_api_key: str = ""
+    media_download_enabled: bool = False
+    media_storage_path: str = "media"
+    media_max_size_bytes: int = 50 * 1024 * 1024
+    media_retention_days: int = 0
+    media_allowed_mime_types: str = (
+        "image/jpeg,image/png,image/gif,video/mp4,audio/mpeg,audio/ogg,application/pdf"
+    )
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
@@ -91,10 +99,26 @@ class Settings(BaseSettings):
     # Use the `allowed_origins_list` property or `parse_origins()` to get a list.
     allowed_origins: str = "http://localhost:3000,http://localhost:5173"
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug_value(cls, value: object) -> object:
+        """Accept deployment labels as well as standard boolean values."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod", "false", "0", "no", "off"}:
+                return False
+            if normalized in {"debug", "development", "dev", "true", "1", "yes", "on"}:
+                return True
+        return value
+
     @property
     def allowed_origins_list(self) -> List[str]:
         """Return CORS origins as a list."""
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def media_allowed_mime_types_list(self) -> List[str]:
+        return [item.strip().lower() for item in self.media_allowed_mime_types.split(",") if item.strip()]
 
     # ── Convenience helpers ──────────────────────────────────────────────────
     @property

@@ -17,6 +17,8 @@ class GroupAddRequest(BaseModel):
     """Payload for POST /api/groups."""
 
     identifier: str
+    collection_authorized: Optional[bool] = None
+    media_download_authorized: Optional[bool] = None
     """
     How to identify the group.  Accepted formats:
       - @username          (public groups)
@@ -44,6 +46,9 @@ class GroupResponse(BaseModel):
     username: Optional[str]
     group_type: GroupType
     is_active: bool
+    collection_authorized: bool
+    collection_authorized_at: Optional[datetime]
+    media_download_authorized: bool
     member_count: Optional[int]
     first_synced_at: Optional[datetime]
     last_synced_at: Optional[datetime]

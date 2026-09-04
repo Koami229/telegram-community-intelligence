@@ -132,6 +132,60 @@ async def test_get_group_returns_existing() -> None:
     mock_session.add.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_updating_group_without_authorization_fields_preserves_consent() -> None:
+    from app.db.repositories.repos import create_or_get_group
+
+    existing = MagicMock()
+    existing.telegram_group_id = -1001234567890
+    existing.title = "Existing"
+    existing.username = "existing"
+    existing.is_active = True
+    existing.collection_authorized = True
+    existing.collection_authorized_at = datetime.now(tz=timezone.utc)
+    existing.media_download_authorized = True
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = existing
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+
+    group, created = await create_or_get_group(
+        session,
+        telegram_group_id=existing.telegram_group_id,
+        title="Updated",
+        username="updated",
+        group_type=GroupType.SUPERGROUP,
+    )
+
+    assert created is False
+    assert group.collection_authorized is True
+    assert group.media_download_authorized is True
+
+
+@pytest.mark.asyncio
+async def test_authorization_audit_stores_actor_and_reason_without_secret() -> None:
+    from app.db.repositories.repos import create_authorization_audit
+
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    record = await create_authorization_audit(
+        session,
+        group_id=1,
+        collection_authorized=True,
+        media_download_authorized=False,
+        actor_label="operator-1",
+        reason="Written owner authorization",
+    )
+
+    assert record.actor_label == "operator-1"
+    assert record.reason == "Written owner authorization"
+    assert not hasattr(record, "api_key")
+    session.add.assert_called_once_with(record)
+
+
 # ── upsert_group_member ───────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

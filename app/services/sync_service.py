@@ -84,6 +84,18 @@ def _participant_to_status(participant: object) -> MemberStatus:
     return MemberStatus.MEMBER
 
 
+async def _skip_processed(
+    participants: object,
+    offset: int,
+):
+    """Yield only participants after the persisted resume offset."""
+    index = 0
+    async for participant in participants:
+        if index >= offset:
+            yield participant
+        index += 1
+
+
 async def start_sync(group_id: int) -> int:
     """
     Create a SyncJob for ``group_id`` and launch the background task.
@@ -184,7 +196,9 @@ async def _run_sync(group_id: int, job_id: int) -> None:
     try:
         logger.info("[SyncJob %s] Fetching participants (offset=%s)…", job_id, offset)
 
-        async for participant in client.iter_participants(entity, aggressive=False):
+        async for participant in _skip_processed(
+            client.iter_participants(entity, aggressive=False), resume_offset
+        ):
             user = getattr(participant, "user", None) or participant
             if not hasattr(user, "id"):
                 continue

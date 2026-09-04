@@ -13,8 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.groups import router as groups_router
 from app.api.health import router as health_router
 from app.api.members import router as members_router
+from app.api.messages import router as messages_router
 from app.api.sync import router as sync_router
 from app.core.config import get_settings
+from app.core.version import APP_VERSION
 from app.db.database import check_db_connection
 from app.telegram.client import telegram_service
 from app.workers.monitoring import monitoring_worker
@@ -69,7 +71,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Telegram Community Intelligence",
         description="Monitor and analyse Telegram groups you have legitimate access to.",
-        version="0.1.0",
+        version=APP_VERSION,
         lifespan=lifespan,
     )
 
@@ -86,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(groups_router)
     app.include_router(members_router)
+    app.include_router(messages_router)
     app.include_router(sync_router)
 
     return app
@@ -94,5 +97,8 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-# ── Version bump ──────────────────────────────────────────────────────────────
-VERSION = "0.2.0"
+
+
+
+
+

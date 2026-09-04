@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.db.database import check_db_connection
 from app.telegram.client import telegram_service
+from app.core.version import APP_VERSION
 
 router = APIRouter(tags=["Health"])
 
@@ -28,6 +29,12 @@ class StatusResponse(BaseModel):
     telegram_configured: bool
     telegram_connected: bool
     telegram_authorized: bool
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    database: str
+    telegram: str
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,8 +79,23 @@ async def api_status() -> StatusResponse:
 
     return StatusResponse(
         status="ok",
-        version="0.1.0",
+        version=APP_VERSION,
         telegram_configured=cfg.telegram_configured,
         telegram_connected=telegram_service.is_connected(),
         telegram_authorized=await telegram_service.is_authorized(),
+    )
+
+
+@router.get("/ready", response_model=ReadinessResponse, summary="Readiness check")
+async def readiness() -> ReadinessResponse:
+    """Report whether required dependencies are ready for data operations."""
+    database_ready = await check_db_connection()
+    telegram_ready = (
+        telegram_service.is_connected()
+        and await telegram_service.is_authorized()
+    )
+    return ReadinessResponse(
+        status="ready" if database_ready and telegram_ready else "not_ready",
+        database="connected" if database_ready else "disconnected",
+        telegram="connected" if telegram_ready else "disconnected",
     )

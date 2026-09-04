@@ -13,10 +13,15 @@ from app.db.repositories.repos import get_group_by_id, get_latest_sync_job
 from app.schemas.sync import SyncJobResponse, SyncStartResponse
 from app.services.sync_service import get_sync_status, start_sync
 from app.models.models import SyncStatus
+from app.core.security import require_ingestion_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/groups", tags=["Sync"])
+router = APIRouter(
+    prefix="/api/groups",
+    tags=["Sync"],
+    dependencies=[Depends(require_ingestion_key)],
+)
 
 
 # ── POST /api/groups/{id}/sync ────────────────────────────────────────────────

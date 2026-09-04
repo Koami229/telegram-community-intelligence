@@ -66,7 +66,7 @@ def test_list_members_empty() -> None:
     app.dependency_overrides[get_db_session] = _override_db(mock_session)
     try:
         with (
-            TestClient(app) as c,
+            TestClient(app, headers={"X-API-Key": "test-ingestion-key"}) as c,
             patch("app.api.members.get_group_by_id", new_callable=AsyncMock, return_value=mock_group),
         ):
             response = c.get("/api/groups/1/members")
@@ -88,7 +88,7 @@ def test_list_members_pagination_params() -> None:
     app.dependency_overrides[get_db_session] = _override_db(mock_session)
     try:
         with (
-            TestClient(app) as c,
+            TestClient(app, headers={"X-API-Key": "test-ingestion-key"}) as c,
             patch("app.api.members.get_group_by_id", new_callable=AsyncMock, return_value=mock_group),
         ):
             response = c.get("/api/groups/1/members?page=2&page_size=25")
@@ -115,7 +115,7 @@ def test_list_members_search_param() -> None:
     app.dependency_overrides[get_db_session] = _override_db(mock_session)
     try:
         with (
-            TestClient(app) as c,
+            TestClient(app, headers={"X-API-Key": "test-ingestion-key"}) as c,
             patch("app.api.members.get_group_by_id", new_callable=AsyncMock, return_value=mock_group),
         ):
             response = c.get("/api/groups/1/members?search=alice")

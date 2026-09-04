@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.models import SyncStatus
 from app.services.sync_service import (
     _participant_to_status,
+    _skip_processed,
     _flush_batch,
     get_sync_status,
 )
@@ -44,6 +45,16 @@ def test_participant_to_status_regular() -> None:
     assert _participant_to_status(p) == MemberStatus.MEMBER
 
 
+@pytest.mark.asyncio
+async def test_skip_processed_uses_resume_offset() -> None:
+    async def participants():
+        for item in range(5):
+            yield item
+
+    resumed = [item async for item in _skip_processed(participants(), 2)]
+    assert resumed == [2, 3, 4]
+
+
 # ── start_sync ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -65,7 +76,7 @@ async def test_start_sync_creates_job_and_returns_id() -> None:
         patch("app.services.sync_service.get_group_by_id", return_value=mock_group),
         patch("app.services.sync_service.get_latest_sync_job", return_value=None),
         patch("app.services.sync_service.create_sync_job", return_value=mock_job),
-        patch("asyncio.create_task") as mock_task,
+        patch("asyncio.create_task", side_effect=lambda coroutine: coroutine.close()) as mock_task,
     ):
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)

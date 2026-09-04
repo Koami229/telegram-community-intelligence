@@ -10,7 +10,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,11 @@ from app.models.models import (
     SyncJob,
     SyncStatus,
     User,
+    MediaDownloadStatus,
+    MediaType,
+    TelegramMedia,
+    TelegramMessage,
+    AuthorizationAudit,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,6 +117,8 @@ async def create_or_get_group(
     username: Optional[str],
     group_type: GroupType,
     member_count: Optional[int] = None,
+    collection_authorized: Optional[bool] = None,
+    media_download_authorized: Optional[bool] = None,
 ) -> tuple[Group, bool]:
     """
     Return (group, created) where created is True if the group was inserted.
@@ -127,6 +135,9 @@ async def create_or_get_group(
             username=username,
             group_type=group_type,
             is_active=True,
+            collection_authorized=bool(collection_authorized),
+            collection_authorized_at=_utcnow() if collection_authorized else None,
+            media_download_authorized=bool(media_download_authorized),
             member_count=member_count,
         )
         session.add(group)
@@ -137,6 +148,13 @@ async def create_or_get_group(
     group.title = title or group.title
     group.username = username or group.username
     group.is_active = True
+    if collection_authorized is not None:
+        group.collection_authorized = collection_authorized
+        group.collection_authorized_at = _utcnow() if collection_authorized else None
+        if not collection_authorized:
+            group.media_download_authorized = False
+    if media_download_authorized is not None and group.collection_authorized:
+        group.media_download_authorized = media_download_authorized
     if member_count is not None:
         group.member_count = member_count
     return group, False
@@ -169,6 +187,186 @@ async def update_group_sync_timestamps(
     await session.execute(
         update(Group).where(Group.id == group_id).values(**values)
     )
+
+
+async def set_collection_authorization(
+    session: AsyncSession,
+    group_id: int,
+    *,
+    authorized: bool,
+    media_download_authorized: bool = False,
+) -> Optional[Group]:
+    """Record an explicit collection authorization decision for a group."""
+    result = await session.execute(select(Group).where(Group.id == group_id))
+    group = result.scalar_one_or_none()
+    if group is None:
+        return None
+    group.collection_authorized = authorized
+    group.collection_authorized_at = _utcnow() if authorized else None
+    group.media_download_authorized = (
+        media_download_authorized if authorized else False
+    )
+    await session.flush()
+    return group
+
+
+async def create_authorization_audit(
+    session: AsyncSession,
+    *,
+    group_id: int,
+    collection_authorized: bool,
+    media_download_authorized: bool,
+    actor_label: Optional[str],
+    reason: Optional[str],
+) -> AuthorizationAudit:
+    audit = AuthorizationAudit(
+        group_id=group_id,
+        collection_authorized=collection_authorized,
+        media_download_authorized=media_download_authorized,
+        actor_label=actor_label,
+        reason=reason,
+    )
+    session.add(audit)
+    await session.flush()
+    return audit
+
+
+async def get_authorization_audits(
+    session: AsyncSession,
+    *,
+    group_id: int,
+    limit: int = 100,
+) -> Sequence[AuthorizationAudit]:
+    result = await session.execute(
+        select(AuthorizationAudit)
+        .where(AuthorizationAudit.group_id == group_id)
+        .order_by(AuthorizationAudit.created_at.desc(), AuthorizationAudit.id.desc())
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def upsert_telegram_message(
+    session: AsyncSession,
+    *,
+    group_id: int,
+    telegram_message_id: int,
+    message_date: datetime,
+    author_telegram_id: Optional[int],
+    text: Optional[str],
+    content_hash: Optional[str],
+) -> tuple[TelegramMessage, bool]:
+    """Insert or update message metadata without creating duplicates."""
+    result = await session.execute(
+        select(TelegramMessage).where(
+            TelegramMessage.group_id == group_id,
+            TelegramMessage.telegram_message_id == telegram_message_id,
+        )
+    )
+    message = result.scalar_one_or_none()
+    if message is None:
+        message = TelegramMessage(
+            group_id=group_id,
+            telegram_message_id=telegram_message_id,
+            message_date=message_date,
+            author_telegram_id=author_telegram_id,
+            text=text,
+            content_hash=content_hash,
+        )
+        session.add(message)
+        await session.flush()
+        return message, True
+
+    message.message_date = message_date
+    message.author_telegram_id = author_telegram_id
+    message.text = text
+    message.content_hash = content_hash
+    return message, False
+
+
+async def upsert_telegram_media(
+    session: AsyncSession,
+    *,
+    message_id: int,
+    media_index: int,
+    media_type: MediaType,
+    file_name: Optional[str],
+    mime_type: Optional[str],
+    size_bytes: Optional[int],
+    remote_reference: Optional[str],
+) -> TelegramMedia:
+    """Persist media metadata; never marks a file as downloaded."""
+    result = await session.execute(
+        select(TelegramMedia).where(
+            TelegramMedia.message_id == message_id,
+            TelegramMedia.media_index == media_index,
+        )
+    )
+    media = result.scalar_one_or_none()
+    if media is None:
+        media = TelegramMedia(
+            message_id=message_id,
+            media_index=media_index,
+            media_type=media_type,
+            file_name=file_name,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            remote_reference=remote_reference,
+            download_status=MediaDownloadStatus.NOT_REQUESTED,
+        )
+        session.add(media)
+        await session.flush()
+        return media
+
+    media.media_type = media_type
+    media.file_name = file_name
+    media.mime_type = mime_type
+    media.size_bytes = size_bytes
+    media.remote_reference = remote_reference
+    return media
+
+
+async def get_telegram_messages(
+    session: AsyncSession,
+    *,
+    group_id: int,
+    offset: int = 0,
+    limit: int = 50,
+) -> Sequence[TelegramMessage]:
+    """Return stored message metadata with its optional media records."""
+    result = await session.execute(
+        select(TelegramMessage)
+        .options(selectinload(TelegramMessage.media))
+        .where(TelegramMessage.group_id == group_id)
+        .order_by(TelegramMessage.message_date.desc(), TelegramMessage.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def delete_telegram_media(
+    session: AsyncSession,
+    *,
+    group_id: int,
+    media_id: int,
+) -> Optional[TelegramMedia]:
+    """Remove one local media record belonging to the requested group."""
+    result = await session.execute(
+        select(TelegramMedia)
+        .join(TelegramMessage)
+        .where(
+            TelegramMedia.id == media_id,
+            TelegramMessage.id == TelegramMedia.message_id,
+            TelegramMessage.group_id == group_id,
+        )
+    )
+    media = result.scalar_one_or_none()
+    if media is None:
+        return None
+    await session.delete(media)
+    await session.flush()
+    return media
 
 
 # ─────────────────────────────────────────────────────────────────────────────

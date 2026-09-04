@@ -4,6 +4,7 @@ Tests: Groups and Sync API endpoints.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,6 +31,8 @@ def _mock_group(
     g.username = username
     g.group_type = group_type
     g.is_active = True
+    g.collection_authorized = True
+    g.collection_authorized_at = datetime.now(tz=timezone.utc)
     g.member_count = member_count
     g.first_synced_at = None
     g.last_synced_at = None
@@ -41,6 +44,7 @@ def _mock_group(
 
 def test_add_group_success(client: TestClient) -> None:
     mock_group = _mock_group()
+    mock_group.media_download_authorized = True
 
     with (
         patch("app.api.groups.resolve_and_save_group", return_value=(mock_group, True)) as mock_resolve,
@@ -192,3 +196,33 @@ def test_sync_status_no_job(client: TestClient) -> None:
     ):
         response = client.get("/api/groups/1/sync/status")
     assert response.status_code == 404
+
+
+def test_authorization_audit_returns_typed_records(client: TestClient) -> None:
+    record = SimpleNamespace(
+        id=4,
+        group_id=1,
+        collection_authorized=True,
+        media_download_authorized=False,
+        actor_label="operator-1",
+        reason="Owner approval",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    with (
+        patch("app.api.groups.get_group_by_id", new_callable=AsyncMock, return_value=_mock_group()),
+        patch("app.api.groups.get_authorization_audits", new_callable=AsyncMock, return_value=[record]),
+    ):
+        response = client.get("/api/groups/1/authorization/audit")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["actor_label"] == "operator-1"
+    assert body[0]["media_download_authorized"] is False
+
+
+def test_authorization_reason_is_length_limited(client: TestClient) -> None:
+    response = client.post(
+        "/api/groups/1/authorization",
+        json={"confirmed": True, "reason": "x" * 2001},
+    )
+    assert response.status_code == 422

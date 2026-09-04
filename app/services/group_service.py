@@ -95,6 +95,8 @@ def _determine_group_type(entity: object) -> GroupType:
 async def resolve_and_save_group(
     session: AsyncSession,
     identifier: str,
+    collection_authorized: Optional[bool] = None,
+    media_download_authorized: Optional[bool] = None,
 ) -> tuple[Group, bool]:
     """
     Resolve ``identifier`` via Telegram and persist the group.
@@ -168,5 +170,7 @@ async def resolve_and_save_group(
         username=username,
         group_type=group_type,
         member_count=member_count,
+        collection_authorized=collection_authorized,
+        media_download_authorized=media_download_authorized,
     )
     return group, created

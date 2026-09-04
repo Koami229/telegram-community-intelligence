@@ -16,10 +16,15 @@ from app.db.database import get_db_session
 from app.db.repositories.repos import get_group_by_id
 from app.models.models import Group, GroupMember, MemberStatus, User
 from app.schemas.member import GroupMemberResponse, MemberListResponse
+from app.core.security import require_ingestion_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/groups", tags=["Members"])
+router = APIRouter(
+    prefix="/api/groups",
+    tags=["Members"],
+    dependencies=[Depends(require_ingestion_key)],
+)
 
 
 @router.get(
